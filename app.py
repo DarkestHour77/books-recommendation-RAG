@@ -3,13 +3,12 @@ import sys
 
 import streamlit as st
 from dotenv import load_dotenv
-from pgvector.psycopg2 import register_vector
 from psycopg2.pool import SimpleConnectionPool
 
 load_dotenv()
 
 sys.path.insert(0, os.path.dirname(__file__))
-from scripts.query import run_query
+from scripts.query import run_query, setup_conn
 
 st.set_page_config(page_title="Book Recommender", page_icon="📚", layout="wide")
 
@@ -22,7 +21,7 @@ def get_db_pool():
 
 def get_conn():
     conn = get_db_pool().getconn()
-    register_vector(conn)
+    setup_conn(conn)
     return conn
 
 
@@ -63,7 +62,7 @@ if search and query.strip():
                 with col:
                     if src.get("image_url"):
                         st.image(src["image_url"], width=120)
-                    st.markdown(f"**{src.get('title', 'Unknown')}**")
+                    st.markdown(f"**{src.get('title', 'Unknown')}** `{src.get('work_id', '')}`")
                     st.markdown(f"*{src.get('author', '')}*")
                     if src.get("avg_rating"):
                         st.markdown(f"⭐ {src['avg_rating']:.1f}")

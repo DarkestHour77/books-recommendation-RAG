@@ -8,6 +8,7 @@ import logging
 import os
 
 import cohere
+import numpy as np
 import psycopg2.extras
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -18,19 +19,31 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-LLM_MODEL = os.getenv("LLM_MODEL", "minimax/minimax-m2.5:free")
+EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "perplexity/pplx-embed-v1-0.6b")
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 COHERE_MODEL = os.getenv("COHERE_RERANK_MODEL", "rerank-english-v3.0")
-VECTOR_FETCH = 200
+VECTOR_FETCH_BOOKS = 100
+VECTOR_FETCH_REVIEWS = 100
 RERANK_TOP_N = 5
 
-embed_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+embed_client = OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+)
 llm_client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
 )
 cohere_client = cohere.Client(os.getenv("COHERE_API_KEY"))
 spell = SpellChecker()
+
+
+def setup_conn(conn):
+    """Ensure the vector extension exists and register the type. Call after every psycopg2.connect()."""
+    with conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        conn.commit()
+    register_vector(conn)
 
 
 def spell_correct(query: str) -> str:
@@ -70,12 +83,21 @@ Query: {user_query}"""
         temperature=0,
     )
     raw = resp.choices[0].message.content or ""
+    # Strip markdown code fences if present
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[-2] if cleaned.count("```") >= 2 else cleaned
+        cleaned = cleaned.lstrip("json").strip()
+    # Extract first {...} block in case of leading/trailing text
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end != -1:
+        cleaned = cleaned[start:end + 1]
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(cleaned)
         rewritten = parsed.get("rewritten_query") or user_query
         filters = parsed.get("filters") or {}
     except (json.JSONDecodeError, KeyError, ValueError):
-        log.warning("LLM returned malformed JSON for rewrite/extract; using raw query")
+        log.warning("LLM returned malformed JSON for rewrite/extract; using raw query. Raw: %s", raw[:200])
         rewritten, filters = user_query, {}
     return rewritten, filters
 
@@ -87,7 +109,7 @@ def embed_query(text: str) -> list[float]:
 
 def vector_search(conn, query_embedding: list[float], filters: dict) -> list[dict]:
     conditions = ["1=1"]
-    params: dict = {"query_vector": query_embedding}
+    params: dict = {"query_vector": np.array(query_embedding)}
 
     if filters.get("rating"):
         conditions.append("rating >= %(rating)s")
@@ -106,23 +128,31 @@ def vector_search(conn, query_embedding: list[float], filters: dict) -> list[dic
         params["author"] = f"%{filters['author']}%"
 
     where_clause = " AND ".join(conditions)
-    sql = f"""
+    base_sql = """
         SELECT chunk_text, record_type, work_id, review_id,
                title, author, isbn, avg_rating, image_url,
                original_publication_year, rating
         FROM book_embeddings
-        WHERE {where_clause}
+        WHERE record_type = %(record_type)s AND {where}
         ORDER BY embedding <=> %(query_vector)s
-        LIMIT {VECTOR_FETCH}
+        LIMIT %(limit)s
     """
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         try:
+            cur.execute("SAVEPOINT before_hnsw_hint;")
             cur.execute("SET LOCAL hnsw.iterative_scan = 'relaxed_order';")
         except Exception:
-            pass
-        cur.execute(sql, params)
-        return [dict(r) for r in cur.fetchall()]
+            cur.execute("ROLLBACK TO SAVEPOINT before_hnsw_hint;")
+
+        results = []
+        for rtype, limit in [("book", VECTOR_FETCH_BOOKS), ("review", VECTOR_FETCH_REVIEWS)]:
+            cur.execute(
+                base_sql.format(where=where_clause),
+                {**params, "record_type": rtype, "limit": limit},
+            )
+            results.extend(dict(r) for r in cur.fetchall())
+        return results
 
 
 def rerank(user_query: str, candidates: list[dict]) -> list[dict]:
@@ -174,6 +204,15 @@ def run_query(conn, user_query: str) -> tuple[object, list[dict]]:
     candidates = vector_search(conn, query_vec, filters)
     log.info("Vector search returned %d candidates", len(candidates))
 
+    # Keep only the highest-ranked chunk per book so Cohere sees diverse results
+    seen: dict = {}
+    for c in candidates:
+        wid = c["work_id"]
+        if wid not in seen:
+            seen[wid] = c
+    candidates = list(seen.values())
+    log.info("After dedup: %d unique books", len(candidates))
+
     top_chunks = rerank(user_query, candidates)
     log.info("Reranked to %d chunks", len(top_chunks))
 
@@ -194,7 +233,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pool = SimpleConnectionPool(1, 2, dsn=os.getenv("DATABASE_URL"))
     conn = pool.getconn()
-    register_vector(conn)
+    setup_conn(conn)
 
     q = " ".join(sys.argv[1:]) or "good science fiction novels"
     stream, chunks = run_query(conn, q)

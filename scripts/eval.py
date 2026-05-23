@@ -13,11 +13,10 @@ import sys
 
 import yaml
 from dotenv import load_dotenv
-from pgvector.psycopg2 import register_vector
 from psycopg2.pool import SimpleConnectionPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from scripts.query import run_query
+from scripts.query import run_query, setup_conn
 
 load_dotenv()
 logging.basicConfig(level=logging.WARNING)
@@ -43,7 +42,7 @@ def main():
 
     pool = SimpleConnectionPool(1, 2, dsn=os.getenv("DATABASE_URL"))
     conn = pool.getconn()
-    register_vector(conn)
+    setup_conn(conn)
 
     scores = []
     for case in cases:

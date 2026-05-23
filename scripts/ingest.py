@@ -33,12 +33,15 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "perplexity/pplx-embed-v1-0.6b")
 EMBED_BATCH = 100
 DB_BATCH = 500
 MAX_WORKERS = 8
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+)
 enc = tiktoken.get_encoding("cl100k_base")
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
 
@@ -184,7 +187,7 @@ def create_schema(conn):
                 review_id                 VARCHAR(50),
                 chunk_index               INT NOT NULL,
                 chunk_text                TEXT NOT NULL,
-                embedding                 VECTOR(1536),
+                embedding                 VECTOR(1024),
                 title                     TEXT,
                 author                    TEXT,
                 isbn                      VARCHAR(20),
@@ -226,29 +229,35 @@ def ingest_books(conn) -> int:
     total = 0
     pending: list[dict] = []
 
-    with conn.cursor(name="books_cursor", cursor_factory=psycopg2.extras.RealDictCursor) as read_cur, \
-         conn.cursor() as write_cur:
-        read_cur.itersize = 500
-        read_cur.execute("""
-            SELECT work_id, original_title AS title, author, description, genres,
-                   isbn, isbn13, original_publication_year, num_pages,
-                   image_url, avg_rating, ratings_count
-            FROM books
-        """)
-        count_cur = conn.cursor()
-        count_cur.execute("SELECT COUNT(*) FROM books")
-        total_books = count_cur.fetchone()[0]
-        count_cur.close()
+    # Named (server-side) cursors are tied to a transaction; conn.commit() inside
+    # flush() would invalidate them. Use a separate autocommit connection for reading.
+    read_conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    try:
+        with read_conn.cursor(name="books_cursor", cursor_factory=psycopg2.extras.RealDictCursor) as read_cur, \
+             conn.cursor() as write_cur:
+            read_cur.itersize = 500
+            read_cur.execute("""
+                SELECT work_id, original_title AS title, author, description, genres,
+                       isbn, isbn13, original_publication_year, num_pages,
+                       image_url, avg_rating, ratings_count
+                FROM books
+            """)
+            count_cur = read_conn.cursor()
+            count_cur.execute("SELECT COUNT(*) FROM books")
+            total_books = count_cur.fetchone()[0]
+            count_cur.close()
 
-        for row in tqdm(read_cur, total=total_books, desc="books"):
-            pending.extend(chunks_for_book(row))
-            if len(pending) >= DB_BATCH:
+            for row in tqdm(read_cur, total=total_books, desc="books"):
+                pending.extend(chunks_for_book(row))
+                if len(pending) >= DB_BATCH:
+                    total += flush(write_cur, conn, pending)
+                    pending = []
+                    log.info("books: %d chunks upserted so far", total)
+
+            if pending:
                 total += flush(write_cur, conn, pending)
-                pending = []
-                log.info("books: %d chunks upserted so far", total)
-
-        if pending:
-            total += flush(write_cur, conn, pending)
+    finally:
+        read_conn.close()
 
     return total
 
@@ -257,35 +266,39 @@ def ingest_reviews(conn) -> int:
     total = 0
     pending: list[dict] = []
 
-    with conn.cursor(name="reviews_cursor", cursor_factory=psycopg2.extras.RealDictCursor) as read_cur, \
-         conn.cursor() as write_cur:
-        read_cur.itersize = 500
-        read_cur.execute("""
-            SELECT r.review_id, r.work_id, r.user_id, r.review_text,
-                   r.started_at, r.read_at, r.date_added, r.rating,
-                   b.original_title AS title, b.author, b.isbn, b.isbn13,
-                   b.original_publication_year, b.num_pages, b.image_url,
-                   b.avg_rating, b.ratings_count
-            FROM reviews r
-            JOIN books b ON b.work_id = r.work_id
-            WHERE r.review_text IS NOT NULL AND length(r.review_text) > 0
-        """)
-        count_cur = conn.cursor()
-        count_cur.execute(
-            "SELECT COUNT(*) FROM reviews WHERE review_text IS NOT NULL AND length(review_text) > 0"
-        )
-        total_reviews = count_cur.fetchone()[0]
-        count_cur.close()
+    read_conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+    try:
+        with read_conn.cursor(name="reviews_cursor", cursor_factory=psycopg2.extras.RealDictCursor) as read_cur, \
+             conn.cursor() as write_cur:
+            read_cur.itersize = 500
+            read_cur.execute("""
+                SELECT r.review_id, r.work_id, r.user_id, r.review_text,
+                       r.started_at, r.read_at, r.date_added, r.rating,
+                       b.original_title AS title, b.author, b.isbn, b.isbn13,
+                       b.original_publication_year, b.num_pages, b.image_url,
+                       b.avg_rating, b.ratings_count
+                FROM reviews r
+                JOIN books b ON b.work_id = r.work_id
+                WHERE r.review_text IS NOT NULL AND length(r.review_text) > 0
+            """)
+            count_cur = read_conn.cursor()
+            count_cur.execute(
+                "SELECT COUNT(*) FROM reviews WHERE review_text IS NOT NULL AND length(review_text) > 0"
+            )
+            total_reviews = count_cur.fetchone()[0]
+            count_cur.close()
 
-        for row in tqdm(read_cur, total=total_reviews, desc="reviews"):
-            pending.extend(chunks_for_review(row))
-            if len(pending) >= DB_BATCH:
+            for row in tqdm(read_cur, total=total_reviews, desc="reviews"):
+                pending.extend(chunks_for_review(row))
+                if len(pending) >= DB_BATCH:
+                    total += flush(write_cur, conn, pending)
+                    pending = []
+                    log.info("reviews: %d chunks upserted so far", total)
+
+            if pending:
                 total += flush(write_cur, conn, pending)
-                pending = []
-                log.info("reviews: %d chunks upserted so far", total)
-
-        if pending:
-            total += flush(write_cur, conn, pending)
+    finally:
+        read_conn.close()
 
     return total
 
@@ -297,9 +310,9 @@ def main():
     args = parser.parse_args()
 
     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    register_vector(conn)
 
     create_schema(conn)
+    register_vector(conn)
 
     if args.truncate:
         log.info("--truncate: dropping all rows from book_embeddings")
