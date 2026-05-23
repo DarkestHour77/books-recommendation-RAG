@@ -1,0 +1,14 @@
+langchain
+langchain-community
+langchain-text-splitters
+openai
+cohere
+psycopg2-binary
+pgvector
+pyspellchecker
+python-dotenv
+streamlit
+tiktoken
+tenacity
+tqdm
+pyyaml
