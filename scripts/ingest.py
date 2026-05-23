@@ -52,11 +52,18 @@ def truncate_to_tokens(text: str, max_tokens: int = 8000) -> str:
 
 
 def book_chunk_text(row: dict) -> str:
-    return (
-        f"{row['title'] or ''} by {row['author'] or ''}. "
-        f"{row['description'] or ''} "
-        f"Genres: {row['genres'] or ''}"
-    ).strip()
+    parts = [f"{row['title'] or ''} by {row['author'] or ''}."]
+    if row.get("original_publication_year"):
+        parts.append(f"Published: {row['original_publication_year']}.")
+    if row.get("num_pages"):
+        parts.append(f"Pages: {row['num_pages']}.")
+    if row.get("avg_rating"):
+        parts.append(f"Rating: {row['avg_rating']:.1f}/5.")
+    if row.get("description"):
+        parts.append(row["description"])
+    if row.get("genres"):
+        parts.append(f"Genres: {row['genres']}")
+    return " ".join(parts).strip()
 
 
 def review_chunk_text(row: dict) -> str:
