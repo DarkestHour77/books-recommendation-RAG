@@ -155,7 +155,7 @@ def vector_search(conn, query_embedding: list[float], filters: dict) -> list[dic
         return results
 
 
-def rerank(user_query: str, candidates: list[dict]) -> list[dict]:
+def rerank(user_query: str, candidates: list[dict], top_n: int = RERANK_TOP_N) -> list[dict]:
     if not candidates:
         return []
     docs = [c["chunk_text"] for c in candidates]
@@ -163,22 +163,109 @@ def rerank(user_query: str, candidates: list[dict]) -> list[dict]:
         model=COHERE_MODEL,
         query=user_query,
         documents=docs,
-        top_n=min(RERANK_TOP_N, len(docs)),
+        top_n=min(top_n, len(docs)),
     )
     return [candidates[r.index] for r in results.results]
 
 
+def filter_mentioned_books(
+    user_query: str, chunks: list[dict], target_n: int = RERANK_TOP_N
+) -> list[dict]:
+    """Ask the LLM which books in `chunks` are already referenced in the user query
+    and should therefore be excluded from recommendations.
+
+    `chunks` is expected to be a ranked pool larger than `target_n` so that when
+    books are excluded the gap is filled by the next-best candidates already present
+    in the pool.  The function always returns exactly `target_n` results (or fewer
+    only when the pool itself is smaller than `target_n`).
+
+    If the LLM call fails, the first `target_n` chunks are returned unchanged.
+    """
+    if not chunks:
+        return chunks
+
+    titles = [c.get("title", "") for c in chunks]
+    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(titles))
+
+    prompt = f"""You are a filter for a book recommendation engine.
+
+The user asked: "{user_query}"
+
+The following books have been retrieved as candidates (ranked best-first):
+{numbered}
+
+Which of these books is the user already referring to or asking about in their query?
+These books should NOT be recommended back to them.
+
+Return JSON only, no commentary, with this exact shape:
+{{
+  "exclude_indices": [<1-based index of book to exclude>, ...]
+}}
+
+If no books should be excluded, return: {{"exclude_indices": []}}"""
+
+    try:
+        resp = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        raw = resp.choices[0].message.content or ""
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[-2] if cleaned.count("```") >= 2 else cleaned
+            cleaned = cleaned.lstrip("json").strip()
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end != -1:
+            cleaned = cleaned[start:end + 1]
+        parsed = json.loads(cleaned)
+        exclude = set(int(i) - 1 for i in parsed.get("exclude_indices", []))
+        log.info("LLM decided to exclude book indices (0-based): %s", exclude)
+    except Exception as exc:
+        log.warning("filter_mentioned_books LLM call failed (%s); skipping filter.", exc)
+        return chunks[:target_n]
+
+    # Walk the ranked pool in order; skip excluded books, keep until we hit target_n.
+    kept = []
+    for i, c in enumerate(chunks):
+        if i in exclude:
+            log.info("Excluding mentioned book: %s", c.get("title"))
+            continue
+        kept.append(c)
+        if len(kept) == target_n:
+            break
+
+    if not kept:
+        log.warning("LLM excluded all books in pool; falling back to top-%d.", target_n)
+        return chunks[:target_n]
+
+    return kept
+
+
 def build_rag_prompt(user_query: str, chunks: list[dict]) -> list[dict]:
-    context = "\n\n".join(
-        f"[{i+1}] {c['chunk_text']}" for i, c in enumerate(chunks)
-    )
+    context_parts = []
+    for i, c in enumerate(chunks):
+        if c["record_type"] == "book":
+            source_label = "Book Info"
+            header = ""
+        else:
+            source_label = "Reader Review"
+            header = f"[Review of: {c.get('title', '?')} by {c.get('author', '?')}]\n"
+        context_parts.append(f"[{i+1}] [{source_label}] {header}{c['chunk_text']}")
+    context = "\n\n".join(context_parts)
     return [
         {
             "role": "system",
             "content": (
                 "You are a helpful book recommendation assistant. "
                 "Answer only using the provided context. "
-                "If the answer isn't in the context, say you don't know."
+                "For every book in the context (numbered [1], [2], …) write exactly one section. "
+                "Begin each section with a bold heading on its own line in this format: "
+                "**[number]. Title by Author** "
+                "then write a short recommendation paragraph for that book. "
+                "Present the sections in the same numbered order as the context. "
+                "Do not skip any book. "
+                "If a book does not fit the query, still include it and briefly explain why it might not match."
             ),
         },
         {
@@ -213,8 +300,14 @@ def run_query(conn, user_query: str) -> tuple[object, list[dict]]:
     candidates = list(seen.values())
     log.info("After dedup: %d unique books", len(candidates))
 
-    top_chunks = rerank(user_query, candidates)
-    log.info("Reranked to %d chunks", len(top_chunks))
+    # Rerank a larger pool (2× target) so we have backfills ready if
+    # filter_mentioned_books strips books the user already referenced.
+    rerank_fetch = RERANK_TOP_N * 2
+    ranked_pool = rerank(user_query, candidates, top_n=rerank_fetch)
+    log.info("Reranked to %d chunks (extended pool)", len(ranked_pool))
+
+    top_chunks = filter_mentioned_books(user_query, ranked_pool, target_n=RERANK_TOP_N)
+    log.info("After mention-filter: %d chunks", len(top_chunks))
 
     messages = build_rag_prompt(user_query, top_chunks)
     stream = llm_client.chat.completions.create(

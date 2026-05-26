@@ -67,7 +67,8 @@ def book_chunk_text(row: dict) -> str:
 
 
 def review_chunk_text(row: dict) -> str:
-    return (row["review_text"] or "").strip()
+    prefix = f"Review of '{row.get('title', '')}' by {row.get('author', '')}:\n"
+    return (prefix + (row["review_text"] or "")).strip()
 
 
 @retry(wait=wait_exponential(min=1, max=30), stop=stop_after_attempt(6))
@@ -314,6 +315,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--truncate", action="store_true",
                         help="Drop all existing embeddings before re-ingesting")
+    parser.add_argument("--books-only", action="store_true",
+                        help="Delete and re-ingest only book chunks, leave reviews untouched")
     args = parser.parse_args()
 
     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
@@ -326,14 +329,22 @@ def main():
         with conn.cursor() as cur:
             cur.execute("TRUNCATE TABLE book_embeddings;")
             conn.commit()
+    elif args.books_only:
+        log.info("--books-only: deleting existing book chunks")
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM book_embeddings WHERE record_type = 'book';")
+            conn.commit()
 
     log.info("Ingesting book records...")
     book_chunks = ingest_books(conn)
     log.info("Book chunks upserted: %d", book_chunks)
 
-    log.info("Ingesting review records...")
-    review_chunks = ingest_reviews(conn)
-    log.info("Review chunks upserted: %d", review_chunks)
+    if not args.books_only:
+        log.info("Ingesting review records...")
+        review_chunks = ingest_reviews(conn)
+        log.info("Review chunks upserted: %d", review_chunks)
+    else:
+        review_chunks = 0
 
     build_hnsw_index(conn)
     conn.close()
