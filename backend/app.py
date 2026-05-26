@@ -26,10 +26,19 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="Book Recommender API")
 
-# Allow the Vite dev server and any localhost origin
+# Allow the Vite dev server in development.
+# In production on Vercel the frontend and backend share the same origin so
+# CORS is not required, but keeping the middleware active is harmless.
+# Override via the ALLOWED_ORIGINS env var (comma-separated list of origins).
+_raw_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
