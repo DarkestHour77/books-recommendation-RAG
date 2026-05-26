@@ -4,6 +4,7 @@ Ingest books and reviews from goodreads_db into book_embeddings (pgvector).
 
 Usage:
     python scripts/ingest.py            # idempotent — skips already-ingested chunks
+    python scripts/ingest.py --books # drop books rows first, then re-embed everything
     python scripts/ingest.py --truncate # drop all rows first, then re-embed everything
 """
 
