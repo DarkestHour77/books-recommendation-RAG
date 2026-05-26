@@ -7,7 +7,8 @@ psycopg2-binary
 pgvector
 pyspellchecker
 python-dotenv
-streamlit
+fastapi
+uvicorn[standard]
 tiktoken
 tenacity
 tqdm
