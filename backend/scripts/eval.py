@@ -15,10 +15,11 @@ import yaml
 from dotenv import load_dotenv
 from psycopg2.pool import SimpleConnectionPool
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _BACKEND_DIR)
 from scripts.query import run_query, setup_conn
 
-load_dotenv()
+load_dotenv(os.path.join(_BACKEND_DIR, '.env'))
 logging.basicConfig(level=logging.WARNING)
 
 EVAL_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "eval", "eval_queries.yaml")

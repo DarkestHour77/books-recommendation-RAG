@@ -15,7 +15,7 @@ from openai import OpenAI
 from pgvector.psycopg2 import register_vector
 from spellchecker import SpellChecker
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 log = logging.getLogger(__name__)
 

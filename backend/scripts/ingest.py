@@ -25,7 +25,7 @@ from psycopg2.extras import execute_values
 from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm import tqdm
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 logging.basicConfig(
     level=logging.INFO,

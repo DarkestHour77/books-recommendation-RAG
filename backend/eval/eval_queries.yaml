@@ -1,12 +1,12 @@
 # Evaluation queries for recall@k regression testing.
 # expect_work_ids: fill in real work_ids from your DB after first ingest.
 - query: "books like Project Hail Mary"
-  expect_work_ids: []
+  expect_work_ids: [1007609,47452430,1253374,23848992,46061374]
 - query: "short sci-fi novels under 300 pages"
-  expect_work_ids: []
+  expect_work_ids: [21964544,893435,15208454,48287734,622728]
 - query: "best fantasy series with magic systems"
-  expect_work_ids: []
+  expect_work_ids: [92896,45777900,6798109,3387,1257385]
 - query: "literary fiction about family and grief"
-  expect_work_ids: []
+  expect_work_ids: [1118162,50833530,54003394,1070136,41419441]
 - query: "non-fiction books about psychology"
-  expect_work_ids: []
+  expect_work_ids: [13303699,29303,26542311,14625976,6524551]
