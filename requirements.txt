@@ -1,0 +1,13 @@
+# Runtime deps for the Vercel serverless function (app.py + scripts/query.py).
+# langchain / tiktoken / tqdm / pyyaml are only used by ingest scripts — omitted
+# here to keep the bundle under Vercel's 250 MB limit.
+openai
+cohere
+psycopg2-binary
+pgvector
+numpy
+pyspellchecker
+python-dotenv
+fastapi
+uvicorn[standard]
+tenacity
