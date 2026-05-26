@@ -1,0 +1,61 @@
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+}
+
+.heading {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--primary);
+  margin-bottom: 14px;
+}
+
+.body {
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.body p {
+  margin-bottom: 12px;
+}
+
+.body p:last-child {
+  margin-bottom: 0;
+}
+
+.body strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.body em {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.body ul,
+.body ol {
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+
+.body li {
+  margin-bottom: 4px;
+}
+
+.cursor {
+  display: inline-block;
+  animation: blink 1s steps(1) infinite;
+  color: var(--primary);
+  margin-left: 1px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
