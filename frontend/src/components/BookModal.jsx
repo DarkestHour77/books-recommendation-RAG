@@ -40,7 +40,7 @@ export default function BookModal({ workId, initialBook, onClose }) {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(`${import.meta.env.VITE_API_BASE || ''}/api/book/${workId}`)
+    fetch(`/api/book/${workId}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
