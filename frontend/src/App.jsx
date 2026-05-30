@@ -3,9 +3,28 @@ import SearchBar from './components/SearchBar'
 import StreamingAnswer from './components/StreamingAnswer'
 import BookCard from './components/BookCard'
 import BookModal from './components/BookModal'
+import Balatro from './components/Balatro'
 import styles from './App.module.css'
 
 const MAX_RETRIES = 2
+
+function extractBookReview(answerText, bookTitle) {
+  if (!answerText || !bookTitle) return ''
+  // Split on blank lines OR the start of a numbered/bulleted list item
+  const blocks = answerText
+    .split(/\n\n+|\n(?=\d+\.|\s*[-*]\s)/)
+    .map(b => b.replace(/^\s*\d+\.\s+|^\s*[-*]\s+/, '').trim())
+    .filter(Boolean)
+  const lower = bookTitle.toLowerCase()
+  const matched = blocks.filter(b => b.toLowerCase().includes(lower))
+  if (!matched.length) return ''
+  return matched[0]
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^#+\s+/gm, '')
+    .trim()
+}
 
 /**
  * Reorder `sourcesArr` by the position each book's title first appears in
@@ -111,7 +130,16 @@ export default function App() {
   }, [runSearch])
 
   return (
-    <div className={styles.app}>
+    <>
+      <Balatro
+        isRotate={false}
+        mouseInteraction
+        pixelFilter={745}
+        color1="#DE443B"
+        color2="#006BB4"
+        color3="#162325"
+      />
+      <div className={styles.app}>
       <header className={styles.header}>
         <h1 className={styles.logo}>📚 Book Recommender</h1>
         <p className={styles.subtitle}>
@@ -128,21 +156,26 @@ export default function App() {
           </div>
         )}
 
-        <StreamingAnswer text={answer} streaming={streaming} />
+        {streaming && <StreamingAnswer text={answer} streaming={streaming} />}
 
-        {sources.length > 0 && (
+        {!streaming && sources.length > 0 && (
           <section>
-            <h2 className={styles.sourcesHeading}>Sources</h2>
-            <div className={styles.grid}>
+            <h2 className={styles.sourcesHeading}>Recommendations</h2>
+            <div className={styles.list}>
               {sources.map((book, i) => (
                 <BookCard
                   key={book.work_id ?? i}
                   book={book}
+                  reviewText={extractBookReview(answer, book.title)}
                   onClick={() => setSelectedBook(book)}
                 />
               ))}
             </div>
           </section>
+        )}
+
+        {!streaming && answer && sources.length === 0 && (
+          <StreamingAnswer text={answer} streaming={false} />
         )}
       </main>
 
@@ -158,6 +191,7 @@ export default function App() {
           onClose={() => setSelectedBook(null)}
         />
       )}
-    </div>
+      </div>
+    </>
   )
 }

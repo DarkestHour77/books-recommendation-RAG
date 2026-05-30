@@ -3,19 +3,18 @@ import styles from './BookCard.module.css'
 const PLACEHOLDER =
   'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=120&h=180&fit=crop'
 
-export default function BookCard({ book, onClick }) {
+export default function BookCard({ book, onClick, reviewText }) {
   const {
     title = 'Unknown Title',
     author = '',
     avg_rating,
     original_publication_year,
     image_url,
-    work_id,
   } = book
 
   return (
     <article
-      className={styles.card}
+      className={`${styles.card} ${reviewText ? styles.withReview : ''}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -44,6 +43,11 @@ export default function BookCard({ book, onClick }) {
         </div>
         <span className={styles.viewDetails}>View details →</span>
       </div>
+      {reviewText && (
+        <div className={styles.review}>
+          {reviewText}
+        </div>
+      )}
     </article>
   )
 }

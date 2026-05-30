@@ -7,23 +7,23 @@
 }
 
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface-hover: #21253a;
-  --border: #2e3250;
-  --primary: #6c63ff;
-  --primary-hover: #5a52e0;
-  --text: #e8eaf6;
-  --text-muted: #8f96b0;
+  --bg: #0a0f18;
+  --surface: #0f1520;
+  --surface-hover: #162030;
+  --border: #1e3050;
+  --primary: #1a8fd1;
+  --primary-hover: #1478b5;
+  --text: #e0ecf8;
+  --text-muted: #7a9ab8;
   --star: #f5c518;
   --radius: 12px;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
   line-height: 1.6;
   min-height: 100vh;
 }
